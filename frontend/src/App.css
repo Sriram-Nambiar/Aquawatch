@@ -1107,6 +1107,9 @@ body::before {
 .report-content__title {
   font-size: 1.2rem; font-weight: 800; color: var(--text-bright);
 }
+.report-actions {
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end;
+}
 .report-content__body {
   font-size: 0.92rem; line-height: 1.8; color: var(--text-primary);
 }

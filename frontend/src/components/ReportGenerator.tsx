@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getLakes } from '../services/api';
-import api from '../services/api';
+import { generateLakeReport, getLakes } from '../services/api';
 
 function ReportGenerator() {
   const [lakes, setLakes] = useState<any[]>([]);
@@ -24,9 +23,7 @@ function ReportGenerator() {
       setReport('');
       setMetadata(null);
 
-      const { data } = await api.post('/report/generate', {
-        lake_name: selectedLake,
-      });
+      const data = await generateLakeReport(selectedLake);
 
       if (data.success) {
         setReport(data.report);
@@ -45,16 +42,93 @@ function ReportGenerator() {
     }
   };
 
-  const handleDownload = () => {
+  const reportHeader = () =>
+    `# AquaWatch AI Report\n**Lake:** ${metadata?.lake_name || selectedLake}\n**Generated:** ${metadata?.generated_at ? new Date(metadata.generated_at).toLocaleString() : 'Not available'}\n**Model:** ${metadata?.model || 'NVIDIA NIM'}\n\n---\n\n`;
+
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const markdownToHtml = (md: string) => {
+    const inline = (text: string) =>
+      escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+    return md
+      .split('\n')
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        if (trimmed.startsWith('# ')) return `<h1>${inline(trimmed.slice(2))}</h1>`;
+        if (trimmed.startsWith('## ')) return `<h2>${inline(trimmed.slice(3))}</h2>`;
+        if (trimmed.startsWith('### ')) return `<h3>${inline(trimmed.slice(4))}</h3>`;
+        if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) return `<li>${inline(trimmed.slice(2))}</li>`;
+        if (/^\d+\.\s/.test(trimmed)) return `<li>${inline(trimmed.replace(/^\d+\.\s/, ''))}</li>`;
+        if (trimmed.startsWith('---')) return '<hr />';
+        return `<p>${inline(trimmed)}</p>`;
+      })
+      .join('\n')
+      .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
+  };
+
+  const handleDownloadMarkdown = () => {
     if (!report) return;
     const blob = new Blob(
-      [`# AquaWatch AI Report\n**Lake:** ${metadata?.lake_name}\n**Generated:** ${new Date(metadata?.generated_at).toLocaleString()}\n**Model:** ${metadata?.model}\n\n---\n\n${report}`],
+      [`${reportHeader()}${report}`],
       { type: 'text/markdown' }
     );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `aquawatch_report_${(metadata?.lake_name || 'lake').replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadHtml = () => {
+    if (!report) return;
+
+    const title = `AquaWatch report - ${metadata?.lake_name || selectedLake}`;
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin: 0; color: #172033; background: #f6f8fb; line-height: 1.65; }
+    main { max-width: 900px; margin: 32px auto; padding: 36px; background: #fff; border: 1px solid #dbe3ee; border-radius: 8px; }
+    h1, h2, h3 { line-height: 1.25; color: #0f172a; }
+    h1 { font-size: 28px; border-bottom: 2px solid #0ea5e9; padding-bottom: 12px; }
+    h2 { font-size: 21px; margin-top: 28px; color: #0369a1; }
+    h3 { font-size: 17px; margin-top: 20px; }
+    p, li { font-size: 15px; }
+    ul { padding-left: 22px; }
+    .meta { color: #64748b; font-size: 13px; margin-bottom: 26px; }
+    hr { border: 0; border-top: 1px solid #dbe3ee; margin: 24px 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AquaWatch AI Report</h1>
+    <div class="meta">
+      <strong>Lake:</strong> ${escapeHtml(metadata?.lake_name || selectedLake)}<br />
+      <strong>Generated:</strong> ${escapeHtml(metadata?.generated_at ? new Date(metadata.generated_at).toLocaleString() : 'Not available')}<br />
+      <strong>Model:</strong> ${escapeHtml(metadata?.model || 'NVIDIA NIM')}
+    </div>
+    ${markdownToHtml(report)}
+  </main>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aquawatch_report_${(metadata?.lake_name || 'lake').replace(/[^a-zA-Z0-9]/g, '_')}.html`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -250,9 +324,14 @@ function ReportGenerator() {
                 <h2 className="report-content__title">
                   📄 Report: {metadata?.lake_name}
                 </h2>
-                <button className="btn btn--ghost" onClick={handleDownload}>
-                  ⬇️ Download .md
-                </button>
+                <div className="report-actions">
+                  <button className="btn btn--ghost" onClick={handleDownloadHtml}>
+                    Download HTML
+                  </button>
+                  <button className="btn btn--ghost" onClick={handleDownloadMarkdown}>
+                    Download Markdown
+                  </button>
+                </div>
               </div>
               <div className="report-content__body">
                 {renderMarkdown(report)}
