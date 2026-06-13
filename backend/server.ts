@@ -23,6 +23,9 @@ const WATER_RISK_PORTAL_URL =
 const PREDICTIONS_FILE = path.join(__dirname_esm, "data", "lake_predictions.json");
 const PARAMETERS_FILE = path.join(__dirname_esm, "data", "lake_parameters.json");
 const PREDICT_SCRIPT = path.join(__dirname_esm, "..", "ml_pipeline", "predict_api.py");
+const DEFAULT_NVIDIA_MODEL = "nvidia/llama-3.1-nemotron-nano-8b-v1";
+const NVIDIA_CHAT_COMPLETIONS_URL =
+  "https://integrate.api.nvidia.com/v1/chat/completions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,6 +121,42 @@ function loadParameters(): LakeRecord[] {
     console.error("Failed to load parameters:", err.message);
     return [];
   }
+}
+
+function normalizeLakeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function findLakeByName(lakes: LakeRecord[], lakeName: string): LakeRecord | undefined {
+  const normalizedName = normalizeLakeName(lakeName);
+  return lakes.find((lake) => normalizeLakeName(lake.lake_name) === normalizedName);
+}
+
+const MONTH_ORDER: Record<string, number> = {
+  january: 0,
+  february: 1,
+  march: 2,
+  april: 3,
+  may: 4,
+  june: 5,
+  july: 6,
+  august: 7,
+  september: 8,
+  october: 9,
+  november: 10,
+  december: 11,
+};
+
+function getRecordTime(record: LakeRecord): number {
+  const year = Number(record.year ?? 0);
+  const month = MONTH_ORDER[String(record.month ?? "").toLowerCase()] ?? 0;
+  return year * 12 + month;
+}
+
+function getRecentRecords(records: LakeRecord[], count = 6): LakeRecord[] {
+  return [...records]
+    .sort((a, b) => getRecordTime(a) - getRecordTime(b))
+    .slice(-count);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,12 +268,10 @@ app.get("/api/lakes", (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 app.get("/api/lakes/:lakeName/history", (req: Request, res: Response) => {
   try {
-    const lakeName = decodeURIComponent(req.params.lakeName);
+    const lakeName = decodeURIComponent(String(req.params.lakeName ?? ""));
     const parameters = loadParameters();
 
-    const lake = parameters.find(
-      (l) => l.lake_name.toLowerCase() === lakeName.toLowerCase()
-    );
+    const lake = findLakeByName(parameters, lakeName);
 
     if (!lake) {
       return res.status(404).json({
@@ -278,12 +315,10 @@ app.get("/api/parameters", (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 app.get("/api/parameters/:lakeName", (req: Request, res: Response) => {
   try {
-    const lakeName = decodeURIComponent(req.params.lakeName);
+    const lakeName = decodeURIComponent(String(req.params.lakeName ?? ""));
     const parameters = loadParameters();
 
-    const lake = parameters.find(
-      (l) => l.lake_name.toLowerCase() === lakeName.toLowerCase()
-    );
+    const lake = findLakeByName(parameters, lakeName);
 
     if (!lake) {
       return res.status(404).json({
@@ -624,18 +659,18 @@ app.get("/api/webhook/history", (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 app.post("/api/report/generate", async (req: Request, res: Response) => {
   const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-  const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "nvidia/llama-3.3-nemotron-super-49b-v1";
+  const NVIDIA_MODEL = process.env.NVIDIA_MODEL || DEFAULT_NVIDIA_MODEL;
 
   if (!NVIDIA_API_KEY) {
     return res.status(500).json({
       success: false,
-      error: "NVIDIA API key not configured. Set NVIDIA_API_KEY in backend/.env",
+      error: "NVIDIA API key is not configured. Add NVIDIA_API_KEY to backend/.env and restart the backend.",
     });
   }
 
   try {
     const { lake_name } = req.body;
-    if (!lake_name) {
+    if (!lake_name || typeof lake_name !== "string") {
       return res.status(400).json({ success: false, error: "lake_name is required" });
     }
 
@@ -643,12 +678,8 @@ app.post("/api/report/generate", async (req: Request, res: Response) => {
     const predictions = loadPredictions();
     const parameters = loadParameters();
 
-    const lakePrediction = predictions.find(
-      (l) => l.lake_name.toLowerCase() === lake_name.toLowerCase()
-    );
-    const lakeParams = parameters.find(
-      (l) => l.lake_name.toLowerCase() === lake_name.toLowerCase()
-    );
+    const lakePrediction = findLakeByName(predictions, lake_name);
+    const lakeParams = findLakeByName(parameters, lake_name);
 
     if (!lakePrediction) {
       return res.status(404).json({ success: false, error: `Lake "${lake_name}" not found` });
@@ -656,11 +687,15 @@ app.post("/api/report/generate", async (req: Request, res: Response) => {
 
     // Build context for the AI
     const records = lakeParams?.records ?? [];
-    const recentRecords = records.slice(-6); // last 6 data points for trend analysis
+    const recentRecords = getRecentRecords(records);
 
     const lakeContext = JSON.stringify({
       lake_name: lakePrediction.lake_name,
       location: { latitude: lakePrediction.latitude, longitude: lakePrediction.longitude },
+      latest_sample: {
+        year: lakePrediction.year,
+        month: lakePrediction.month,
+      },
       latest_parameters: {
         ph: lakePrediction.ph,
         bod_mg_per_l: lakePrediction.bod,
@@ -679,6 +714,7 @@ app.post("/api/report/generate", async (req: Request, res: Response) => {
       historical_records: recentRecords.map((r: any) => ({
         year: r.year, month: r.month,
         ph: r.ph, bod: r.bod, cod: r.cod, tds: r.tds, coliform: r.total_coliform,
+        risk: r.ml_risk ?? r.risk_level,
       })),
       total_historical_records: records.length,
     }, null, 2);
@@ -703,19 +739,45 @@ Report Structure:
 
 Use clear headings, bullet points, and bold text. Be specific with numbers. Do NOT use generic filler text.`;
 
+    const reportPrompt = `You are AquaWatch AI, an expert water quality analyst. Generate a professional water quality assessment report in Markdown.
+
+CPCB (Central Pollution Control Board) Safe Limits:
+- pH: 6.5 to 8.5
+- BOD: <= 3 mg/L
+- COD: <= 10 mg/L
+- TDS: <= 500 mg/L
+- Total Coliform: <= 5000 MPN/100mL
+
+Report Structure:
+1. **Executive Summary** - 2 to 3 sentences about current condition.
+2. **Risk Assessment** - ML prediction, confidence, and rule-based cross-check.
+3. **Parameter Analysis** - For each parameter include current value, safe limit, status, and severity.
+4. **Historical Trend Analysis** - Use the supplied records to describe improving, worsening, or stable trends.
+5. **Environmental Impact** - Explain implications for aquatic life, human health, and the ecosystem.
+6. **Remediation Recommendations** - At least 3 specific actionable steps.
+7. **Conclusion** - Final assessment with urgency level.
+
+Rules:
+- Use clear Markdown headings and bullet points.
+- Be specific with numbers from the provided data.
+- Do not invent sampling dates, agencies, field observations, or measurements.
+- If trend data is limited, say that plainly.
+- Keep the report concise enough to read in the app, around 700 to 1000 words.`;
+
     const userPrompt = `Generate a comprehensive water quality report for the following lake:\n\n${lakeContext}`;
 
     console.log(`[AI Report] Generating report for ${lake_name} via NVIDIA NIM`);
 
     const nvidiaResponse = await axios.post(
-      "https://integrate.api.nvidia.com/v1/chat/completions",
+      NVIDIA_CHAT_COMPLETIONS_URL,
       {
         model: NVIDIA_MODEL,
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: reportPrompt },
           { role: "user", content: userPrompt },
         ],
         temperature: 0.6,
+        top_p: 0.95,
         max_tokens: 4096,
       },
       {
@@ -727,7 +789,9 @@ Use clear headings, bullet points, and bold text. Be specific with numbers. Do N
       }
     );
 
-    const reportContent = nvidiaResponse.data?.choices?.[0]?.message?.content;
+    const reportContent = String(
+      nvidiaResponse.data?.choices?.[0]?.message?.content ?? ""
+    ).trim();
 
     if (!reportContent) {
       return res.status(500).json({
@@ -747,9 +811,16 @@ Use clear headings, bullet points, and bold text. Be specific with numbers. Do N
     });
   } catch (err: any) {
     console.error("[AI Report] Error:", err.response?.data || err.message);
-    res.status(500).json({
+    const status = err.response?.status || 500;
+    const providerError =
+      err.response?.data?.detail ||
+      err.response?.data?.error?.message ||
+      err.response?.data?.message;
+    res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: err.response?.data?.detail || err.response?.data?.error?.message || err.message || "Failed to generate report",
+      error: providerError || err.message || "Failed to generate report",
+      status,
+      model: NVIDIA_MODEL,
     });
   }
 });

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  // Use the live URL if available, otherwise fall back to local '/api'
+  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -87,6 +88,15 @@ export const triggerWebhook = async (params) => {
 export const getWebhookHistory = async () => {
   const { data } = await api.get('/webhook/history');
   return data.history || data;
+};
+
+export const generateLakeReport = async (lakeName) => {
+  const { data } = await api.post(
+    '/report/generate',
+    { lake_name: lakeName },
+    { timeout: 130000 }
+  );
+  return data;
 };
 
 export default api;

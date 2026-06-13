@@ -1,17 +1,19 @@
-# AquaWatch — Water Quality Intelligence Platform
+# AquaWatch - Water Quality Intelligence Platform
 
-Integrated water quality monitoring system combining ML-based risk prediction with the Water Risk Portal for automated alerting.
+Integrated water quality monitoring system combining ML-based risk prediction, lake dashboards, AI-generated reports, and Water Risk Portal alerting.
 
 ## Architecture
 
-```
-React Frontend (Vite) → Express.js Backend → Python ML Pipeline
-                                            → Water Risk Portal (webhook)
+```text
+React Frontend (Vite) -> Express.js Backend -> Python ML Pipeline
+                                      \-----> NVIDIA NIM reports
+                                      \-----> Water Risk Portal webhook
 ```
 
 ## Quick Start
 
-### 1. Train the ML Model (one-time)
+### 1. Train the ML Model
+
 ```bash
 cd ml_pipeline
 pip install -r requirements.txt
@@ -19,15 +21,28 @@ python train.py
 python batch_predict.py
 ```
 
-### 2. Start the Backend
+### 2. Configure AI Reports
+
+Create `backend/.env`:
+
+```bash
+NVIDIA_API_KEY=your_nvidia_api_key_here
+
+# Optional. Free-friendly default used by the app:
+NVIDIA_MODEL=nvidia/llama-3.1-nemotron-nano-8b-v1
+```
+
+### 3. Start the Backend
+
 ```bash
 cd backend
 npm install
-node server.js
+npm run dev
 # Server runs on http://localhost:3001
 ```
 
-### 3. Start the Frontend
+### 4. Start the Frontend
+
 ```bash
 cd frontend
 npm install
@@ -38,23 +53,30 @@ npm run dev
 ## Project Structure
 
 | Directory | Stack | Purpose |
-|-----------|-------|---------|
-| `ml_pipeline/` | Python (sklearn) | ML model training, prediction API bridge |
-| `backend/` | Node.js (Express) | REST API, webhook proxy |
-| `frontend/` | React (Vite) | Dashboard UI |
+| --- | --- | --- |
+| `ml_pipeline/` | Python, sklearn | ML model training and prediction bridge |
+| `backend/` | Node.js, Express | REST API, NVIDIA report generation, webhook proxy |
+| `frontend/` | React, Vite | Dashboard UI and downloadable reports |
 
 ## API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/lakes` | All lakes with predictions |
+| `GET` | `/api/lakes/:lakeName/history` | Historical data for a lake |
+| `GET` | `/api/parameters` | All parameter data |
 | `GET` | `/api/stats` | Dashboard statistics |
 | `POST` | `/api/predict` | ML prediction |
 | `POST` | `/api/predict-and-alert` | Predict + auto-alert |
 | `POST` | `/api/webhook/trigger` | Send to Water Risk Portal |
+| `GET` | `/api/webhook/history` | Webhook call history |
+| `POST` | `/api/report/generate` | Generate an AI water quality report |
 
 ## Water Risk Portal Integration
 
-High-risk predictions automatically trigger webhook to:
-`POST https://water-risk-portal.onrender.com/report/risk`
+High-risk predictions automatically trigger:
+
+```text
+POST https://water-risk-portal.onrender.com/report/risk
+```
