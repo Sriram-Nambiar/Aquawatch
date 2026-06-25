@@ -769,26 +769,32 @@ Rules:
     console.log(`[AI Report] Generating report for ${lake_name} via NVIDIA NIM`);
 
     const nvidiaResponse = await axios.post(
-      NVIDIA_CHAT_COMPLETIONS_URL,
-      {
-        model: NVIDIA_MODEL,
-        messages: [
-          { role: "system", content: reportPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature:0.6,
-        top_p: 0.95,
-        max_tokens:16384,
-        stream:false
+  NVIDIA_CHAT_COMPLETIONS_URL,
+  {
+    model: NVIDIA_MODEL,
+    messages: [
+      { 
+        role: "system", 
+        content: "detailed thinking off"   // ✅ Nemotron MUST have this as system
       },
-      {
-        headers: {
-          Authorization: `Bearer ${NVIDIA_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 120000,
-      }
-    );
+      { 
+        role: "user", 
+        content: `${reportPrompt}\n\n${userPrompt}`  // ✅ merge both into user
+      },
+    ],
+    temperature: 0.6,
+    top_p: 0.95,
+    max_tokens: 2048,   // ✅ was 16384 — that's why it timed out
+    stream: false
+  },
+  {
+    headers: {
+      Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 120000,
+  }
+);
 
     const reportContent = String(
       nvidiaResponse.data?.choices?.[0]?.message?.content ?? ""
