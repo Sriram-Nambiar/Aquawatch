@@ -776,10 +776,10 @@ Rules:
           { role: "system", content: reportPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature:1,
+        temperature:0.6,
         top_p: 0.95,
         max_tokens:16384,
-        thinking:false
+        stream:false
       },
       {
         headers: {
