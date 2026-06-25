@@ -23,7 +23,7 @@ const WATER_RISK_PORTAL_URL =
 const PREDICTIONS_FILE = path.join(__dirname_esm, "data", "lake_predictions.json");
 const PARAMETERS_FILE = path.join(__dirname_esm, "data", "lake_parameters.json");
 const PREDICT_SCRIPT = path.join(__dirname_esm, "..", "ml_pipeline", "predict_api.py");
-const DEFAULT_NVIDIA_MODEL = "meta/llama-3.3-70b-instruct";
+const DEFAULT_NVIDIA_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5";
 const NVIDIA_CHAT_COMPLETIONS_URL =
   "https://integrate.api.nvidia.com/v1/chat/completions";
 
